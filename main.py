@@ -1,84 +1,80 @@
 #!/usr/bin/env python3
-"""Ship the finished news image to the grader's output folder.
+"""Ship the finished front page.
 
-The picture itself is already rendered and checked into this repository
-as entry.png. All this script does is place a copy of it where the
-grader expects it, then prove the copy is intact: same bytes, same
-dimensions. Only the Python standard library is used, and nothing is
-downloaded or written outside the chosen output folder.
+The grader runs this file. It takes the rendered ``entry.png`` that sits
+next to it, drops a copy into the output folder the platform expects, and
+checks the copy is exactly the picture we entered: same sha256, same
+1024x1024 size taken from the PNG header. Standard library only, so it
+runs anywhere with no installs and no network.
 """
 
 import hashlib
 import os
 import shutil
 import struct
+import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-IMAGE_NAME = "entry.png"
-IMAGE_PATH = os.path.join(BASE_DIR, IMAGE_NAME)
-READ_SIZE = 65536
-WANTED_DIMS = (1024, 1024)
-PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+EXPECTED_SHA256 = "756341ebea6e20cf3df45148a745055dfa5f162e1a93b7d37b0757d78b67a9f2"
+EXPECTED_WIDTH = 1024
+EXPECTED_HEIGHT = 1024
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOURCE = os.path.join(HERE, "entry.png")
 
 
-def find_output_folder():
-    """Pick where the entry goes: env var first, then /output, else ./output."""
-    chosen = os.environ.get("MAKEFUN_OUTPUT_DIR")
-    if chosen:
-        return chosen
+def pick_output_dir():
+    """Where the platform wants the finished image."""
+    env_dir = os.environ.get("MAKEFUN_OUTPUT_DIR")
+    if env_dir:
+        return env_dir
     if os.path.isdir("/output"):
         return "/output"
-    return os.path.join(os.getcwd(), "output")
+    return os.path.join(HERE, "output")
 
 
-def file_sha256(path):
-    """Hash a file in chunks and return its hex digest."""
-    hasher = hashlib.sha256()
-    with open(path, "rb") as stream:
-        while True:
-            piece = stream.read(READ_SIZE)
-            if not piece:
-                break
-            hasher.update(piece)
-    return hasher.hexdigest()
-
-
-def read_png_size(path):
-    """Read a PNG's width and height straight from its IHDR chunk.
-
-    A PNG starts with an 8-byte signature, then a 4-byte length, the
-    4-byte chunk name "IHDR", and the width/height as two big-endian
-    unsigned 32-bit numbers. That puts both numbers at bytes 16..24.
-    """
-    with open(path, "rb") as stream:
-        head = stream.read(33)
-    if len(head) < 29 or head[:8] != PNG_MAGIC:
-        raise SystemExit("entry.png does not look like a PNG file")
-    if head[12:16] != b"IHDR":
-        raise SystemExit("entry.png is missing its IHDR chunk")
-    width, height = struct.unpack(">II", head[16:24])
+def png_dimensions(path):
+    """Read width and height out of the PNG IHDR chunk."""
+    with open(path, "rb") as handle:
+        header = handle.read(33)
+    if len(header) < 33 or header[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG file: %s" % path)
+    if header[12:16] != b"IHDR":
+        raise ValueError("PNG has no IHDR chunk first: %s" % path)
+    width, height = struct.unpack(">II", header[16:24])
     return width, height
 
 
-def run():
-    """Copy the image out and check the copy before finishing."""
-    folder = find_output_folder()
-    os.makedirs(folder, exist_ok=True)
-    destination = os.path.join(folder, IMAGE_NAME)
-    shutil.copyfile(IMAGE_PATH, destination)
+def sha256_of(path):
+    """Hex digest of a file, streamed so big files stay cheap."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-    original_hash = file_sha256(IMAGE_PATH)
-    copied_hash = file_sha256(destination)
-    if original_hash != copied_hash:
-        raise SystemExit("copied entry.png failed its hash check")
 
-    dims = read_png_size(destination)
-    if dims != WANTED_DIMS:
-        raise SystemExit("entry.png has the wrong size: %s" % (dims,))
+def main():
+    out_dir = pick_output_dir()
+    os.makedirs(out_dir, exist_ok=True)
+    target = os.path.join(out_dir, "entry.png")
+    shutil.copyfile(SOURCE, target)
 
-    print("entry.png sha256:", copied_hash)
-    print("entry.png size:", dims)
+    digest = sha256_of(target)
+    width, height = png_dimensions(target)
+    print("entry.png sha256: %s" % digest)
+    print("entry.png size: (%d, %d)" % (width, height))
+
+    problems = []
+    if digest != EXPECTED_SHA256:
+        problems.append("sha256 mismatch: got %s" % digest)
+    if (width, height) != (EXPECTED_WIDTH, EXPECTED_HEIGHT):
+        problems.append("size mismatch: got %dx%d" % (width, height))
+    if problems:
+        for problem in problems:
+            print("error: %s" % problem, file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    run()
+    sys.exit(main())

@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
-"""Draw the 25 Nov 2026 world-news front page as a 1024x1024 PNG.
+"""Paint the 25 November 2026 world-news front page, 1024x1024.
 
-Everything is fixed: no network, no random numbers, no clock. Running
-it twice gives the same bytes both times.
+One image, five stories, drawn with Pillow from fixed numbers only: no
+network, no clock, no dice. Run it twice and the bytes come out identical.
 
 Usage:
-    python3 build_image.py   # writes entry.png next to this file
+    python3 build_image.py   # writes entry.png beside this file
 """
+
 import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FONTS = "/usr/share/fonts/truetype/dejavu"
+BASE = os.path.dirname(os.path.abspath(__file__))
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
-# Page size.
-PAGE_W, PAGE_H = 1024, 1024
+W, H = 1024, 1024
 
-# Colours.
-BACKGROUND = (248, 244, 238)  # warm off-white page
-MASTHEAD_BG = (18, 32, 62)    # dark navy banner
-RULE_GOLD = (201, 138, 16)    # gold rule and date line
-CARD_BG = (255, 255, 255)     # white story card
-HEADLINE = (22, 22, 22)       # headline text
-BODY_GREY = (96, 96, 96)      # body text
-BORDER = (205, 198, 188)      # card edges and footer rule
-STORY_COLORS = [
-    (178, 34, 34),   # lead: red
+# Palette.
+PAPER = (248, 244, 238)      # warm off-white page
+NAVY = (18, 32, 62)          # masthead
+GOLD = (201, 138, 16)        # date line and rules
+CARD = (255, 255, 255)       # story cards
+INK = (22, 22, 22)           # headlines
+GREY = (96, 96, 96)          # body copy
+EDGE = (205, 198, 188)       # card borders and footer rule
+
+ACCENTS = [
+    (178, 34, 34),   # lead story: red
     (25, 90, 140),   # middle east: blue
     (90, 60, 140),   # tech: purple
     (20, 110, 70),   # europe: green
@@ -34,129 +35,37 @@ STORY_COLORS = [
 ]
 
 
-def font_at(filename, size):
-    """Fetch one DejaVu face at the given point size."""
-    return ImageFont.truetype(os.path.join(FONTS, filename), size)
+def face(name, size):
+    return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
 
 
-TITLE_FONT = font_at("DejaVuSans-Bold.ttf", 54)
-DATE_FONT = font_at("DejaVuSans-Bold.ttf", 26)
-LEAD_FONT = font_at("DejaVuSans-Bold.ttf", 40)
-HEAD_FONT = font_at("DejaVuSans-Bold.ttf", 30)
-TEXT_FONT = font_at("DejaVuSans.ttf", 22)
-TAG_FONT = font_at("DejaVuSans-Bold.ttf", 19)
-FOOT_FONT = font_at("DejaVuSans.ttf", 19)
+F_TITLE = face("DejaVuSans-Bold.ttf", 54)
+F_DATE = face("DejaVuSans-Bold.ttf", 26)
+F_LEAD = face("DejaVuSans-Bold.ttf", 40)
+F_HEAD = face("DejaVuSans-Bold.ttf", 30)
+F_BODY = face("DejaVuSans.ttf", 22)
+F_TAG = face("DejaVuSans-Bold.ttf", 19)
+F_FOOT = face("DejaVuSans.ttf", 19)
 
 
-def wrap(line, font, limit):
-    """Break `line` into as few lines as fit inside `limit` pixels."""
-    words = line.split()
-    out = []
-    current = ""
+def split_lines(text, font, max_px):
+    """Chop text into the fewest lines that fit inside max_px."""
+    words = text.split()
+    lines, current = [], ""
     for word in words:
         trial = (current + " " + word).strip()
-        if font.getlength(trial) <= limit:
+        if font.getlength(trial) <= max_px:
             current = trial
         else:
             if current:
-                out.append(current)
+                lines.append(current)
             current = word
     if current:
-        out.append(current)
-    return out
+        lines.append(current)
+    return lines
 
 
-def _draw_ship(pen, cx, cy, r, colour):
-    """Cargo ship: hull, mast, sail, wave arc below."""
-    pen.polygon(
-        [(cx - r, cy + 6), (cx + r, cy + 6),
-         (cx + r - 8, cy + r - 4), (cx - r + 8, cy + r - 4)],
-        fill=colour,
-    )
-    pen.rectangle([cx - 4, cy - r + 6, cx + 4, cy + 2], fill=colour)
-    pen.polygon(
-        [(cx + 4, cy - r + 6), (cx + 22, cy - 2), (cx + 4, cy - 2)],
-        fill=colour,
-    )
-    pen.arc(
-        [cx - r - 6, cy - r - 14, cx + r + 6, cy + r - 2],
-        200, 340, fill=colour, width=4,
-    )
-
-
-def _draw_tower(pen, cx, cy, r, colour):
-    """Tall tower with a beacon dot and signal marks at the sides."""
-    pen.polygon(
-        [(cx - 12, cy + r), (cx - 8, cy - r + 4),
-         (cx + 8, cy - r + 4), (cx + 12, cy + r)],
-        fill=colour,
-    )
-    pen.rectangle([cx - 20, cy + r - 8, cx + 20, cy + r], fill=colour)
-    pen.ellipse([cx - 3, cy - r - 6, cx + 3, cy - r], fill=colour)
-    for dx in (-26, 26):
-        pen.line([cx + dx, cy - 6, cx + dx + 6, cy + 2],
-                 fill=colour, width=3)
-
-
-def _draw_chip(pen, cx, cy, r, colour):
-    """Microchip: square outline, inner die, pins on every side."""
-    pen.rectangle(
-        [cx - 16, cy - 16, cx + 16, cy + 16], outline=colour, width=5,
-    )
-    pen.rectangle([cx - 7, cy - 7, cx + 7, cy + 7], fill=colour)
-    for i in (-1, 0, 1):
-        pen.line([cx + i * 11, cy - 26, cx + i * 11, cy - 16],
-                 fill=colour, width=3)
-        pen.line([cx + i * 11, cy + 16, cx + i * 11, cy + 26],
-                 fill=colour, width=3)
-        pen.line([cx - 26, cy + i * 11, cx - 16, cy + i * 11],
-                 fill=colour, width=3)
-        pen.line([cx + 16, cy + i * 11, cx + 26, cy + i * 11],
-                 fill=colour, width=3)
-
-
-def _draw_radar(pen, cx, cy, r, colour):
-    """Radar screen: two rings, a sweep arm, a blip in the middle."""
-    pen.ellipse(
-        [cx - r, cy - r, cx + r, cy + r], outline=colour, width=4,
-    )
-    half = r // 2
-    pen.ellipse(
-        [cx - half, cy - half, cx + half, cy + half],
-        outline=colour, width=3,
-    )
-    pen.line([cx, cy, cx + r - 6, cy - r + 12], fill=colour, width=4)
-    pen.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=colour)
-
-
-def _draw_ribbon(pen, cx, cy, r, colour):
-    """Awareness ribbon, looped at the top."""
-    pen.polygon(
-        [(cx, cy - r), (cx + 12, cy - 6), (cx + 6, cy + r),
-         (cx, cy + r - 12), (cx - 6, cy + r), (cx - 12, cy - 6)],
-        fill=colour,
-    )
-    pen.ellipse(
-        [cx - 10, cy - r - 2, cx + 10, cy - r + 14],
-        outline=colour, width=4,
-    )
-
-
-ICON_DRAWERS = {
-    "ship": _draw_ship,
-    "tower": _draw_tower,
-    "chip": _draw_chip,
-    "radar": _draw_radar,
-    "ribbon": _draw_ribbon,
-}
-
-
-def draw_icon(pen, kind, cx, cy, r, colour):
-    """Draw the pictogram for `kind`, centred at (cx, cy)."""
-    ICON_DRAWERS[kind](pen, cx, cy, r, colour)
-
-
-# (tag, icon, headline, body) — five stories from 25 Nov 2026.
+# The five stories of the day: (kicker, pictogram, headline, standfirst).
 STORIES = [
     ("LEAD  •  UKRAINE–RUSSIA", "ship",
      "Ukraine confirms drone strike on Russian ship",
@@ -176,68 +85,128 @@ STORIES = [
 ]
 
 
-def render():
-    """Lay out the front page and hand back the finished PIL image."""
-    img = Image.new("RGB", (PAGE_W, PAGE_H), BACKGROUND)
-    pen = ImageDraw.Draw(img)
+def paint_ship(d, cx, cy, s, colour):
+    """Little cargo ship: hull, cabin mast, sail, and a wave under it."""
+    d.polygon([(cx - s, cy + 4), (cx + s, cy + 4),
+               (cx + s - 6, cy + s - 4), (cx - s + 6, cy + s - 4)],
+              fill=colour)
+    d.rectangle([cx - 3, cy - s + 4, cx + 3, cy], fill=colour)
+    d.polygon([(cx + 3, cy - s + 4), (cx + 18, cy - 2), (cx + 3, cy - 2)],
+              fill=colour)
+    d.arc([cx - s - 5, cy - s - 10, cx + s + 5, cy + s - 2],
+          200, 340, fill=colour, width=4)
 
-    # ---- masthead ----
-    pen.rectangle([0, 0, PAGE_W, 118], fill=MASTHEAD_BG)
-    pen.text((36, 22), "THE WORLD IN ONE IMAGE",
-             font=TITLE_FONT, fill=(255, 255, 255))
-    pen.text((36, 82), "WEDNESDAY  •  25 NOVEMBER 2026",
-             font=DATE_FONT, fill=RULE_GOLD)
-    pen.rectangle([0, 118, PAGE_W, 124], fill=RULE_GOLD)
 
-    # ---- lead story (full-width card) ----
-    x0, y0, x1, y1 = 28, 144, 996, 400
-    pen.rounded_rectangle([x0, y0, x1, y1], radius=14,
-                          fill=CARD_BG, outline=BORDER, width=2)
-    pen.rounded_rectangle([x0, y0, x0 + 14, y1], radius=7,
-                          fill=STORY_COLORS[0])
-    tag, kind, head, body = STORIES[0]
-    pen.text((x0 + 110, y0 + 18), tag, font=TAG_FONT, fill=STORY_COLORS[0])
-    draw_icon(pen, kind, x0 + 62, y0 + 62, 30, STORY_COLORS[0])
-    for i, line in enumerate(wrap(head, LEAD_FONT, x1 - x0 - 60)):
-        pen.text((x0 + 30, y0 + 52 + i * 48), line,
-                 font=LEAD_FONT, fill=HEADLINE)
-    for i, line in enumerate(wrap(body, TEXT_FONT, x1 - x0 - 60)):
-        pen.text((x0 + 30, y0 + 158 + i * 30), line,
-                 font=TEXT_FONT, fill=BODY_GREY)
+def paint_tower(d, cx, cy, s, colour):
+    """Broadcast tower with a beacon on top and signal ticks at the sides."""
+    d.polygon([(cx - 10, cy + s), (cx - 7, cy - s + 4),
+               (cx + 7, cy - s + 4), (cx + 10, cy + s)], fill=colour)
+    d.rectangle([cx - 17, cy + s - 7, cx + 17, cy + s], fill=colour)
+    d.ellipse([cx - 3, cy - s - 5, cx + 3, cy - s + 1], fill=colour)
+    for dx in (-22, 22):
+        d.line([cx + dx, cy - 5, cx + dx + 5, cy + 2], fill=colour, width=3)
 
-    # ---- four smaller stories in a 2x2 grid ----
+
+def paint_chip(d, cx, cy, s, colour):
+    """Microchip: outer square, inner die, pins sticking out each side."""
+    d.rectangle([cx - 14, cy - 14, cx + 14, cy + 14],
+                outline=colour, width=5)
+    d.rectangle([cx - 6, cy - 6, cx + 6, cy + 6], fill=colour)
+    for off in (-9, 0, 9):
+        d.line([cx + off, cy - 22, cx + off, cy - 14], fill=colour, width=3)
+        d.line([cx + off, cy + 14, cx + off, cy + 22], fill=colour, width=3)
+        d.line([cx - 22, cy + off, cx - 14, cy + off], fill=colour, width=3)
+        d.line([cx + 14, cy + off, cx + 22, cy + off], fill=colour, width=3)
+
+
+def paint_radar(d, cx, cy, s, colour):
+    """Radar screen: outer ring, inner ring, sweep arm, centre blip."""
+    d.ellipse([cx - s, cy - s, cx + s, cy + s], outline=colour, width=4)
+    half = s // 2
+    d.ellipse([cx - half, cy - half, cx + half, cy + half],
+              outline=colour, width=3)
+    d.line([cx, cy, cx + s - 5, cy - s + 10], fill=colour, width=4)
+    d.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=colour)
+
+
+def paint_ribbon(d, cx, cy, s, colour):
+    """Awareness ribbon with its loop at the top."""
+    d.polygon([(cx, cy - s), (cx + 10, cy - 5), (cx + 5, cy + s),
+               (cx, cy + s - 10), (cx - 5, cy + s), (cx - 10, cy - 5)],
+              fill=colour)
+    d.ellipse([cx - 9, cy - s - 2, cx + 9, cy - s + 12],
+              outline=colour, width=4)
+
+
+PICTOGRAMS = {
+    "ship": paint_ship,
+    "tower": paint_tower,
+    "chip": paint_chip,
+    "radar": paint_radar,
+    "ribbon": paint_ribbon,
+}
+
+
+def build_page():
+    """Compose the whole front page and return the finished image."""
+    page = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(page)
+
+    # Masthead.
+    d.rectangle([0, 0, W, 118], fill=NAVY)
+    d.text((36, 22), "THE WORLD IN ONE IMAGE", font=F_TITLE, fill=(255, 255, 255))
+    d.text((36, 82), "WEDNESDAY  •  25 NOVEMBER 2026", font=F_DATE, fill=GOLD)
+    d.rectangle([0, 118, W, 124], fill=GOLD)
+
+    # Lead story, full width.
+    lx0, ly0, lx1, ly1 = 28, 144, 996, 400
+    lead_colour = ACCENTS[0]
+    d.rounded_rectangle([lx0, ly0, lx1, ly1], radius=14,
+                        fill=CARD, outline=EDGE, width=2)
+    d.rounded_rectangle([lx0, ly0, lx0 + 14, ly1], radius=7, fill=lead_colour)
+    kicker, kind, headline, standfirst = STORIES[0]
+    PICTOGRAMS[kind](d, lx0 + 62, ly0 + 62, 30, lead_colour)
+    d.text((lx0 + 110, ly0 + 18), kicker, font=F_TAG, fill=lead_colour)
+    y = ly0 + 52
+    for line in split_lines(headline, F_LEAD, lx1 - lx0 - 60):
+        d.text((lx0 + 30, y), line, font=F_LEAD, fill=INK)
+        y += 48
+    y = ly0 + 158
+    for line in split_lines(standfirst, F_BODY, lx1 - lx0 - 60):
+        d.text((lx0 + 30, y), line, font=F_BODY, fill=GREY)
+        y += 30
+
+    # The other four stories, two by two.
     gx, gy, gw, gh, gap = 28, 420, 474, 268, 20
-    for idx, (tag, kind, head, body) in enumerate(STORIES[1:]):
-        col, row = idx % 2, idx // 2
+    for pos, (kicker, kind, headline, standfirst) in enumerate(STORIES[1:]):
+        col, row = pos % 2, pos // 2
         bx = gx + col * (gw + gap)
         by = gy + row * (gh + gap)
-        accent = STORY_COLORS[idx + 1]
-        pen.rounded_rectangle([bx, by, bx + gw, by + gh], radius=14,
-                              fill=CARD_BG, outline=BORDER, width=2)
-        pen.rounded_rectangle([bx, by, bx + gw, by + 8], radius=7, fill=accent)
-        pen.text((bx + 96, by + 22), tag, font=TAG_FONT, fill=accent)
-        draw_icon(pen, kind, bx + 56, by + 58, 26, accent)
+        colour = ACCENTS[pos + 1]
+        d.rounded_rectangle([bx, by, bx + gw, by + gh], radius=14,
+                            fill=CARD, outline=EDGE, width=2)
+        d.rounded_rectangle([bx, by, bx + gw, by + 8], radius=7, fill=colour)
+        PICTOGRAMS[kind](d, bx + 56, by + 58, 26, colour)
+        d.text((bx + 96, by + 22), kicker, font=F_TAG, fill=colour)
         y = by + 62
-        for line in wrap(head, HEAD_FONT, gw - 36):
-            pen.text((bx + 18, y), line, font=HEAD_FONT, fill=HEADLINE)
+        for line in split_lines(headline, F_HEAD, gw - 36):
+            d.text((bx + 18, y), line, font=F_HEAD, fill=INK)
             y += 36
         y += 6
-        for line in wrap(body, TEXT_FONT, gw - 36):
-            pen.text((bx + 18, y), line, font=TEXT_FONT, fill=BODY_GREY)
+        for line in split_lines(standfirst, F_BODY, gw - 36):
+            d.text((bx + 18, y), line, font=F_BODY, fill=GREY)
             y += 28
 
-    # ---- footer ----
-    pen.line([28, 982, 996, 982], fill=BORDER, width=2)
-    pen.text(
-        (28, 990),
-        "Sources: Reuters, Jagran Josh, Newsmriti, HuddleWorld — "
-        "public news search, 25 Nov 2026.",
-        font=FOOT_FONT, fill=BODY_GREY,
-    )
-    return img
+    # Footer.
+    d.line([28, 982, 996, 982], fill=EDGE, width=2)
+    d.text((28, 990),
+           "Sources: Reuters, Jagran Josh, Newsmriti, HuddleWorld — "
+           "public news search, 25 Nov 2026.",
+           font=F_FOOT, fill=GREY)
+    return page
 
 
 if __name__ == "__main__":
-    image = render()
-    image.save(os.path.join(HERE, "entry.png"))
-    print("wrote entry.png", image.size)
+    finished = build_page()
+    finished.save(os.path.join(BASE, "entry.png"))
+    print("wrote entry.png", finished.size)
